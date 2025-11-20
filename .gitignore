@@ -1,0 +1,10 @@
+# PlatformIO build artifacts
+.pio/
+
+# Editor/OS
+.vscode/
+.DS_Store
+
+# Temporary files
+*.log
+*.tmp
