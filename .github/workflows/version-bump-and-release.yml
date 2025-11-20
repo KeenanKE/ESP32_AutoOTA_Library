@@ -1,0 +1,90 @@
+name: Version Bump & Release
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened ]
+  push:
+    branches: [ main ]
+    paths:
+      - 'library.json'
+
+permissions:
+  contents: write
+
+jobs:
+  version-bump:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout PR branch
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.head_ref }}
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Get current version
+      id: current_version
+      run: |
+        VERSION=$(jq -r '.version' library.json)
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Current version: $VERSION"
+
+    - name: Bump patch version
+      id: bump_version
+      run: |
+        CURRENT_VERSION="${{ steps.current_version.outputs.version }}"
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+        NEW_PATCH=$((PATCH + 1))
+        NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+        jq --arg v "$NEW_VERSION" '.version=$v' library.json > library.json.tmp && mv library.json.tmp library.json
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "Bumped to $NEW_VERSION"
+
+    - name: Commit version bump
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add library.json
+        git commit -m "chore: bump library version to ${{ steps.bump_version.outputs.new_version }}" || echo "No changes to commit"
+        git push origin ${{ github.head_ref }} || echo "Push failed"
+
+    - name: Comment on PR
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `🔄 Library version bumped: **${{ steps.current_version.outputs.version }} → ${{ steps.bump_version.outputs.new_version }}**`
+          })
+
+  release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Get version
+      id: version
+      run: |
+        VERSION=$(jq -r '.version' library.json)
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Create tag
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+        git push origin "v${{ steps.version.outputs.version }}"
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.version.outputs.version }}
+        name: Release v${{ steps.version.outputs.version }}
+        body: "Release of ESP32_AutoOTA Library"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
